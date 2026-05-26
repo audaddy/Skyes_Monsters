@@ -3020,41 +3020,59 @@ function loadMeta(){
   try{const raw=localStorage.getItem(SMK);if(!raw)return;const m=JSON.parse(raw);if(m)Object.assign(meta,m);}catch(e){}
 }
 
+/* Save encoding — btoa/atob Base64 so the string isn't plain readable JSON */
+function encodeSave(str){
+  try{return btoa(unescape(encodeURIComponent(str)));}catch(e){return btoa(str);}
+}
+function decodeSave(str){
+  try{return decodeURIComponent(escape(atob(str)));}catch(e){return atob(str);}
+}
+
 function exportSave(){
   const save={
     dragons: localStorage.getItem(SK),
     nextId:  localStorage.getItem(SIK),
     meta:    localStorage.getItem(SMK),
   };
-  const str=JSON.stringify(save);
-  // Copy to clipboard
+  const encoded=encodeSave(JSON.stringify(save));
   if(navigator.clipboard){
-    navigator.clipboard.writeText(str).then(()=>{
-      showNotif('✓ Save copied to clipboard! Paste it on your other device.','#67e8f9');
-    }).catch(()=>exportSaveFallback(str));
+    navigator.clipboard.writeText(encoded).then(()=>{
+      showNotif('✓ Save copied! Paste it on your other device.','#67e8f9');
+    }).catch(()=>exportSaveFallback(encoded));
   } else {
-    exportSaveFallback(str);
+    exportSaveFallback(encoded);
   }
 }
 
 function exportSaveFallback(str){
-  // Show in a prompt box so user can manually copy
-  prompt('Copy this entire save string (Ctrl+A then Ctrl+C):', str);
+  prompt('Copy this save code (Ctrl+A then Ctrl+C):', str);
 }
 
 function importSave(){
-  const str=prompt('Paste your save string here:');
-  if(!str||!str.trim()){return;}
+  const raw=prompt('Paste your save code here:');
+  if(!raw||!raw.trim())return;
   try{
-    const save=JSON.parse(str.trim());
-    if(!save.dragons) throw new Error('Invalid save data');
+    const decoded=decodeSave(raw.trim());
+    const save=JSON.parse(decoded);
+    if(!save.dragons) throw new Error('Invalid');
     if(save.dragons) localStorage.setItem(SK, save.dragons);
     if(save.nextId)  localStorage.setItem(SIK, save.nextId);
     if(save.meta)    localStorage.setItem(SMK, save.meta);
     showNotif('✓ Save imported! Reloading...','#67e8f9');
     setTimeout(()=>location.reload(), 1200);
   } catch(e){
-    showNotif('✗ Invalid save data — make sure you copied the full string.','#ef4444');
+    // Try legacy plain JSON import so old saves still work
+    try{
+      const save=JSON.parse(raw.trim());
+      if(!save.dragons) throw new Error('Invalid');
+      if(save.dragons) localStorage.setItem(SK, save.dragons);
+      if(save.nextId)  localStorage.setItem(SIK, save.nextId);
+      if(save.meta)    localStorage.setItem(SMK, save.meta);
+      showNotif('✓ Save imported! Reloading...','#67e8f9');
+      setTimeout(()=>location.reload(), 1200);
+    } catch(e2){
+      showNotif('✗ Invalid save code — make sure you copied the whole thing.','#ef4444');
+    }
   }
 }
 
