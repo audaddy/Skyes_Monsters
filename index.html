@@ -781,10 +781,13 @@ body{background:#06030f;font-family:'Inter',sans-serif;color:#e2e8f0;min-height:
       <button class="modal-close-btn" onclick="closeModal('habitats-modal')">✕ Close</button>
     </div>
     <p style="font-size:11px;color:#64748b;margin-bottom:16px;">Drag monsters to matching habitats for a happiness bonus.</p>
+    <p id="habitat-tap-hint" style="font-size:11px;color:#64748b;margin-bottom:10px;">Tap a monster chip to select it, then tap a habitat to place it. On desktop you can also drag.</p>
     <div id="habitats-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;"></div>
     <p class="section-header">Wild Pen (unassigned)</p>
     <div id="wild-pen" style="min-height:44px;border-radius:12px;border:1px dashed rgba(100,80,160,.3);padding:8px;display:flex;flex-wrap:wrap;"
+         onclick="tapDropToWild(event)"
          ondragover="event.preventDefault()" ondrop="dropToWild(event)"></div>
+    <p style="font-size:10px;color:#475569;margin-top:6px;">Tap a monster inside a habitat to move it back to the Wild Pen.</p>
   </div>
 </div>
 
@@ -1120,6 +1123,8 @@ body{background:#06030f;font-family:'Inter',sans-serif;color:#e2e8f0;min-height:
     <button class="toolbar-btn" onclick="openModal('accessories-modal');renderAccessories()">✨ Accessories</button>
     <button class="toolbar-btn" onclick="openGreenhouse()" style="color:#4ade80;border-color:rgba(74,222,128,.3);">🌱 Greenhouse</button>
     <button class="toolbar-btn" id="notif-perm-btn" onclick="requestNotifPermission()" style="display:none;">🔔 Enable Alerts</button>
+    <button class="toolbar-btn" onclick="exportSave()" style="color:#67e8f9;border-color:rgba(103,232,249,.3);">💾 Export Save</button>
+    <button class="toolbar-btn" onclick="importSave()" style="color:#67e8f9;border-color:rgba(103,232,249,.3);">📂 Import Save</button>
   </div>
 
   <div class="grid gap-4" style="grid-template-columns:280px 1fr;align-items:start;" id="main-grid">
@@ -2657,50 +2662,74 @@ function showHabitatXPPop(text){
 }
 
 function renderHabitats(){
+  const hasSelected=_habitatSelected!==null;
+  const selD=hasSelected?getDragonById(_habitatSelected):null;
+
   document.getElementById('habitats-grid').innerHTML=HABITATS.map(h=>{
     const monsters=dragons.filter(d=>d.alive&&meta.habitats[d.id]===h.id);
-    // Glow hint border if any unhoused matching monster exists
     const hasMatch=dragons.some(d=>d.alive&&!meta.habitats[d.id]&&h.bonus.includes(d.element));
-    const hintStyle=hasMatch?`animation:habitatMatch 1.8s ease-in-out infinite;--hint-col:${h.bdr};border-color:${h.bdr};box-shadow:0 0 14px ${h.bdr.replace('rgba(','rgba(').replace(',.3)',', .25)')};`:'';
+    const hintStyle=hasMatch?`animation:habitatMatch 1.8s ease-in-out infinite;--hint-col:${h.bdr};border-color:${h.bdr};box-shadow:0 0 14px ${h.bdr.replace(',.3)',', .25)')};`:'';
+    // Highlight zone if a monster is selected and this zone accepts a tap-drop
+    const tapTarget=hasSelected?`cursor:pointer;outline:2px solid ${h.bdr.replace(',.3)',',0.8)')};outline-offset:2px;`:'';
     return `<div class="habitat-zone" id="hz-${h.id}"
-      style="background:${h.col};border-color:${h.bdr};${hintStyle}"
+      style="background:${h.col};border-color:${h.bdr};${hintStyle}${tapTarget}"
+      onclick="tapDropToHabitat('${h.id}')"
       ondragover="event.preventDefault();this.style.opacity='.8'"
       ondragleave="this.style.opacity='1'"
       ondrop="dropToHabitat('${h.id}',event);this.style.opacity='1'">
       <div style="font-size:16px;margin-bottom:2px;">${h.icon}
         <span class="font-cinzel" style="font-size:11px;font-weight:700;color:#e2e8f0;">${h.name}</span>
-        ${hasMatch?`<span style="font-size:9px;color:${h.bdr.replace('rgba(','rgba(').replace(',.3)',', 1)')};margin-left:4px;">✦ match waiting</span>`:''}
+        ${hasSelected?`<span style="font-size:9px;color:#4ade80;margin-left:4px;">← Tap to place here</span>`:hasMatch?`<span style="font-size:9px;color:${h.bdr.replace(',.3)',', 1)')};margin-left:4px;">✦ match waiting</span>`:''}
       </div>
       <p style="font-size:9px;color:#64748b;margin-bottom:6px;">${h.desc} — <em style="color:#94a3b8;">${h.bonus.join(', ')}</em></p>
       <div style="display:flex;flex-wrap:wrap;min-height:28px;gap:4px;" id="hz-monsters-${h.id}">
         ${monsters.map(d=>{
           const v=getVariant(d);const isMatch=h.bonus.includes(d.element);
-          return `<div class="monster-chip" style="background:${v.primary}22;color:${v.primary};border:1px solid ${v.primary}44;${isMatch?'box-shadow:0 0 6px '+v.primary+'55;':''}" draggable="true" ondragstart="dragMonster(${d.id},event)" title="${d.name}${isMatch?' ✦ In matching habitat':''}">${d.name.split(' ')[0]}${isMatch?' ✦':''}</div>`;
+          const isSel=_habitatSelected===d.id;
+          return `<div class="monster-chip" style="background:${v.primary}22;color:${v.primary};border:1px solid ${v.primary}44;${isMatch?'box-shadow:0 0 6px '+v.primary+'55;':''}${isSel?'outline:2px solid #c084fc;outline-offset:1px;':''}" draggable="true" ondragstart="dragMonster(${d.id},event)" onclick="tapSelectMonster(${d.id},event)" title="${d.name}${isMatch?' ✦ In matching habitat':''}">${d.name.split(' ')[0]}${isMatch?' ✦':''}</div>`;
         }).join('')}
       </div>
     </div>`;
   }).join('');
 
-  // Wild pen — show colour-coded hint ring on each chip
-  document.getElementById('wild-pen').innerHTML=dragons.filter(d=>d.alive&&!meta.habitats[d.id]).map(d=>{
+  // Wild pen
+  const wildHtml=dragons.filter(d=>d.alive&&!meta.habitats[d.id]).map(d=>{
     const v=getVariant(d);
     const bestHab=HABITATS.find(h=>h.bonus.includes(d.element));
     const ring=bestHab?`box-shadow:0 0 0 2px ${bestHab.bdr.replace(',.3)',',1)')};`:'';
-    const tip=bestHab?`Drag to: ${bestHab.name} ${bestHab.icon}`:'No matching habitat';
-    return `<div class="monster-chip" style="background:rgba(100,80,160,.15);color:#94a3b8;border:1px solid rgba(100,80,160,.3);${ring}" draggable="true" ondragstart="dragMonster(${d.id},event)" title="${tip}">${d.name.split(' ')[0]} <span style="font-size:8px;opacity:.6;">${bestHab?bestHab.icon:'?'}</span></div>`;
-  }).join('')||'<span style="font-size:11px;color:#475569;padding:4px;">All monsters assigned to habitats!</span>';
+    const isSel=_habitatSelected===d.id;
+    return `<div class="monster-chip" style="background:rgba(100,80,160,.15);color:#94a3b8;border:1px solid rgba(100,80,160,.3);${ring}${isSel?'outline:2px solid #c084fc;outline-offset:1px;background:rgba(124,58,237,.25);color:#e2e8f0;':''}" draggable="true" ondragstart="dragMonster(${d.id},event)" onclick="tapSelectMonster(${d.id},event)" title="${bestHab?'Tap to select, then tap a habitat':'No matching habitat'}">${d.name.split(' ')[0]} <span style="font-size:8px;opacity:.6;">${bestHab?bestHab.icon:'?'}</span></div>`;
+  }).join('');
+  document.getElementById('wild-pen').innerHTML=wildHtml||'<span style="font-size:11px;color:#475569;padding:4px;">All monsters assigned!</span>';
+
+  // Instruction line
+  const hint=document.getElementById('habitat-tap-hint');
+  if(hint){
+    if(hasSelected&&selD) hint.textContent=`${selD.name.split(' ')[0]} selected — tap a habitat zone to place, or tap again to deselect.`;
+    else hint.textContent='Tap a monster chip to select it, then tap a habitat to place it. On desktop you can also drag.';
+  }
 }
 
-let _dragId=null;
-function dragMonster(id,e){_dragId=id;_lastDropId=id;e.dataTransfer.effectAllowed='move';}
+/* Tap-to-select a monster chip */
+let _habitatSelected=null;
+function tapSelectMonster(id,e){
+  e.stopPropagation();
+  if(_habitatSelected===id){_habitatSelected=null;}  // tap again = deselect
+  else{_habitatSelected=id;}
+  renderHabitats();
+}
 
-function dropToHabitat(hid,e){
-  e.preventDefault();
-  if(!_dragId)return;
-  const droppedId=_dragId;_dragId=null;
-  meta.habitats[droppedId]=hid;saveMeta();
-  // Check for matching habitat → XP boost + heartbeat
-  const d=getDragonById(droppedId);
+/* Tap a habitat zone to drop the selected monster there */
+function tapDropToHabitat(hid){
+  if(_habitatSelected===null)return;
+  assignToHabitat(_habitatSelected,hid);
+  _habitatSelected=null;
+}
+
+/* Shared assignment logic used by both drag-drop and tap */
+function assignToHabitat(monsterId,hid){
+  meta.habitats[monsterId]=hid;saveMeta();
+  const d=getDragonById(monsterId);
   const h=HABITATS.find(h=>h.id===hid);
   if(d&&h){
     addLog(`${d.name.split(' ')[0]} moved to ${h.name}`,'#22c55e');
@@ -2716,9 +2745,30 @@ function dropToHabitat(hid,e){
   renderHabitats();
 }
 
+let _dragId=null;
+function dragMonster(id,e){_dragId=id;_lastDropId=id;if(e.dataTransfer)e.dataTransfer.effectAllowed='move';}
+
+function dropToHabitat(hid,e){
+  e.preventDefault();
+  if(!_dragId)return;
+  const droppedId=_dragId;_dragId=null;
+  assignToHabitat(droppedId,hid);
+}
+
 function dropToWild(e){
-  e.preventDefault();if(!_dragId)return;
-  delete meta.habitats[_dragId];_dragId=null;saveMeta();renderHabitats();
+  e.preventDefault();
+  const id=_dragId||_habitatSelected;
+  if(!id)return;
+  _dragId=null;_habitatSelected=null;
+  delete meta.habitats[id];saveMeta();renderHabitats();
+}
+
+function tapDropToWild(e){
+  if(_habitatSelected===null)return;
+  e.stopPropagation();
+  delete meta.habitats[_habitatSelected];
+  _habitatSelected=null;
+  saveMeta();renderHabitats();
 }
 
 function getHabitatBonus(d){
@@ -2968,6 +3018,44 @@ function loadState(){
 }
 function loadMeta(){
   try{const raw=localStorage.getItem(SMK);if(!raw)return;const m=JSON.parse(raw);if(m)Object.assign(meta,m);}catch(e){}
+}
+
+function exportSave(){
+  const save={
+    dragons: localStorage.getItem(SK),
+    nextId:  localStorage.getItem(SIK),
+    meta:    localStorage.getItem(SMK),
+  };
+  const str=JSON.stringify(save);
+  // Copy to clipboard
+  if(navigator.clipboard){
+    navigator.clipboard.writeText(str).then(()=>{
+      showNotif('✓ Save copied to clipboard! Paste it on your other device.','#67e8f9');
+    }).catch(()=>exportSaveFallback(str));
+  } else {
+    exportSaveFallback(str);
+  }
+}
+
+function exportSaveFallback(str){
+  // Show in a prompt box so user can manually copy
+  prompt('Copy this entire save string (Ctrl+A then Ctrl+C):', str);
+}
+
+function importSave(){
+  const str=prompt('Paste your save string here:');
+  if(!str||!str.trim()){return;}
+  try{
+    const save=JSON.parse(str.trim());
+    if(!save.dragons) throw new Error('Invalid save data');
+    if(save.dragons) localStorage.setItem(SK, save.dragons);
+    if(save.nextId)  localStorage.setItem(SIK, save.nextId);
+    if(save.meta)    localStorage.setItem(SMK, save.meta);
+    showNotif('✓ Save imported! Reloading...','#67e8f9');
+    setTimeout(()=>location.reload(), 1200);
+  } catch(e){
+    showNotif('✗ Invalid save data — make sure you copied the full string.','#ef4444');
+  }
 }
 
 /* ═══════════════════════════════════════════════════════
